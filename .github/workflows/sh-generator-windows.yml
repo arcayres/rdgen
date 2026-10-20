@@ -32,10 +32,7 @@ env:
   # for arm64 linux because official Dart SDK does not work
   FLUTTER_ELINUX_VERSION: "3.16.9"
   TAG_NAME: "${{ inputs.upload-tag }}"
-  VCPKG_BINARY_SOURCES: "clear"
-  # vcpkg version: 2024.07.12
-  VCPKG_COMMIT_ID: "${{ inputs.version == 'master' && '9e593bb18ea69cc5095e012465dcd675a822ed0d' || '120deac3062162151622ca4860575a33844ba10b' }}"
-  ARMV7_VCPKG_COMMIT_ID: "6f29f12e82a8293156836ad81cc9bf5af41fe836"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
   VERSION: "${{ inputs.version }}"
   NDK_VERSION: "r28c"
   #signing keys env variable checks
@@ -486,6 +483,41 @@ jobs:
           } else {
             Write-Host "Error: printer-adapter folder not found in repository."
           }
+
+      - name: Read vcpkg baseline
+        id: vcpkg-baseline
+        shell: pwsh
+        run: |
+          $manifest = Get-Content .\\vcpkg.json -Raw | ConvertFrom-Json
+          $baseline = $manifest.'vcpkg-configuration'.'default-registry'.baseline
+          if (-not $baseline) {
+            throw "Could not read the vcpkg baseline from vcpkg.json"
+          }
+          "commit=$baseline" >> $env:GITHUB_OUTPUT
+
+      - name: Setup vcpkg with GitHub Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\\vcpkg
+          vcpkgGitCommitId: ${{ steps.vcpkg-baseline.outputs.commit }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ matrix.job.vcpkg-triplet }}
+        shell: bash
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --triplet ${{ matrix.job.vcpkg-triplet }} --x-install-root="$VCPKG_ROOT/installed"; then
+            find "$VCPKG_ROOT/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+          head -n 100 "$VCPKG_ROOT/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
 
       - name: Build rustdesk
         run: |
