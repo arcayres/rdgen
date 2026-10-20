@@ -519,6 +519,44 @@ jobs:
           fi
           head -n 100 "$VCPKG_ROOT/buildtrees/ffmpeg/build-${{ matrix.job.vcpkg-triplet }}-rel-out.log" || true
 
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install Flutter
+        id: flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: Install RustDesk Windows Flutter engine
+        shell: pwsh
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release -Force
+          $flutterRoot = "${{ steps.flutter.outputs['CACHE-PATH'] }}"
+          $enginePath = Join-Path $flutterRoot "bin/cache/artifacts/engine/windows-x64-release"
+          if (-not (Test-Path $enginePath)) {
+            throw "Flutter Windows engine directory was not created: $enginePath"
+          }
+          Get-ChildItem windows-x64-release | Move-Item -Destination $enginePath -Force
+
+      - name: Patch Flutter dropdown filter
+        if: ${{ env.FLUTTER_VERSION == '3.24.5' }}
+        shell: bash
+        run: |
+          patch_file=".github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          test -f "$patch_file"
+          flutter_root="$(dirname "$(dirname "$(which flutter)")")"
+          cp "$patch_file" "$flutter_root"
+          cd "$flutter_root"
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
